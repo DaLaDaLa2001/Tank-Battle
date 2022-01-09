@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<head>
+    <title>坦克大战网页版</title>
+</head>
+
+<body>
+    <p>wsad操纵蓝色坦克 j 开火 上下左右操纵绿色坦克小键盘0开火</p>
+    <canvas id="myCanvas" width="960" height="640" style="border:2px solid #ff52a3;"></canvas>
+    <!-- 将json的文件内容以js字面量的形式修改,并改其后缀为js的文件引入 -->
+    <script type="text/javascript" src="Tank.js"></script>
+    <!-- 引入地图数据js文件 -->
+    <script type="text/javascript" src="Map.js"></script>
+    <script type="text/javascript">
+        //边界字面量对象
+        var Boundary = {
+            Boundary_Up: 0,
+            Boundary_Down: 640,
+            Boundary_Left: 0,
+            Boundary_Right: 960
+        };
+        //键盘事件状态
+        var KeyPress = {
+            W: false,
+            S: false,
+            A: false,
+            D: false,
+            Up: false,
+            Down: false,
+            Left: false,
+            Right: false,
+            FireOne: false,
+            FireTwo: false
+        };
+        var GameObject_Data = {
+            Grass: Object,
+            Home: Object,
+            Mud: Object,
+            Road: Object,
+            Sign_Bullet: Object,
+            Sign_Tank_Blue: Object,
+            Sign_Tank_Green: Object,
+            Water: Object,
+            Brick: [],
+            Explode: [],
+            Steel: [],
+            Tank_Blue_Run: [],
+            Tank_Green_Run: [],
+            Bullet: [],
+        };
+        //爆炸对象类
+        function Bomb(Type, PosX, PosY, Life) {
+            this.Type = Type;
+            this.PosX = PosX;
+            this.PosY = PosY;
+            this.Life = Life; //炸弹是否存活
+            this.indexs = 0; //帧索引
+            this.index_sum = 0; //爆炸动画重复播放的次数
+            //爆炸动画播放结束,则当前炸弹对象死亡
+            this.checklife = function () {
+                if (this.indexs > 2) {
+                    this.indexs = 0;
+                    this.index_sum += 1;
+                }
+                //重复播放爆炸动画四次后将爆炸对象生命值置为false
+                if (this.index_sum == 4) {
+                    this.Life = false;
+                }
+            }
+        };
+        //老巢对象类
+        function Boss(Type, PosX, PosY) {
+            this.Type = Type;
+            this.PosX = PosX;
+            this.PosY = PosY;
+            this.Life = true;
+        }
+        //坦克对象的基类
+        function Tank(Type, PosX, PosY, Direction) {
+            this.Type = Type;  //类型
+            this.PosX = PosX;  //X坐标
+            this.PosY = PosY;  //Y坐标
+            this.Direction = Direction;  //方向
+            this.Life = true;  //是否存活[此处默认存活]
+        };
+        //我方坦克类
+        function Heros_Tank(Type, PosX, PosY, Direction) {
+            //继承Tank基类(function()即是对象也是函数,因此可以使用此方法进行继承)
+            this.tank = Tank;
+            this.tank(Type, PosX, PosY, Direction);
+            this.indexs = 0; //我方坦克的起始动作帧[坦克的运动动画构成关键]
+            var heros_bullet = null; //
+            var width_half = this.Type[0].w / 2;
+            var height_half = this.Type[0].h / 2;
+            //我方坦克起始动作帧回滚方法
+            this.frameReset = function () {
+                if (this.indexs > 7) {
+                    this.indexs = 0;
+                }
+            }
+            //射击敌人的方法
+            this.shotEnemy = function () {
+                var index = CheckLife_Array(Heros_BulletArray);
+                if (index != -1) {
+                    //将我方坦克子弹数组中某个死亡状态的子弹设置为生存状态
+                    Heros_BulletArray[index].Life = true;
+                    Heros_BulletArray[index].PosX = this.PosX + this.Type[0].w / 2 - 4;
+                    Heros_BulletArray[index].PosY = this.PosY + this.Type[0].h / 2 - 10;
+                    Heros_BulletArray[index].Direction = this.Direction;
+                }
+            }
+            //上移
+            this.MoveUp = function () {
+                this.PosY -= Tank_Speed;
+                this.Direction = "Up";
+            }
+            //下移
+            this.MoveDown = function () {
+                this.PosY += Tank_Speed;
+                this.Direction = "Down";
+            }
+            //左移
+            this.MoveLeft = function () {
+                this.PosX -= Tank_Speed;
+                this.Direction = "Left";
+            }
+            //右移
+            this.MoveRight = function () {
+                this.PosX += Tank_Speed;
+                this.Direction = "Right";
+            }
+        };
+        //敌方坦克
+        function Enemy_Tank(Type, PosX, PosY, Direction) {
+            this.tank = Tank;
+            this.count = 0; //移动次数
+            this.tank(Type, PosX, PosY, Direction);
+            this.bulletlive = true; //发射的子弹是否存活[默认存活,因为开始时都会初始化敌方子弹]
+            this.enemybullet = null; //敌人发射子弹
+            this.Timer = null; //计时器对象
+            this.Run = function () {
+                var Them = new Enemy_Tank(GameObject_Data.Sign_Tank_Blue, 0, 0, "Up");
+                Them.Direction = this.Direction;
+                Them.PosX = this.PosX;
+                Them.PosY = this.PosY;
+                switch (this.Direction) {
+                    case "Up":
+                        Them.PosY -= Tank_Speed;
+                        if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                            this.PosY -= Tank_Speed;
+                        }
+                        break;
+                    case "Down":
+                        Them.PosY += Tank_Speed + 16;
+                        if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                            this.PosY += Tank_Speed;
+                        }
+                        break;
+                    case "Left":
+                        Them.PosX -= Tank_Speed;
+                        if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                            this.PosX -= Tank_Speed;
+                        }
+                        break;
+                    case "Right":
+                        Them.PosX += Tank_Speed + 16;
+                        if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                            this.PosX += Tank_Speed;
+                        }
+                        break;
+                }
+                if (this.count > 80) {
+                    var seed = parseInt((Math.random() * 4));
+                    switch (seed) {
+                        case 0:
+                            this.Direction = "Up";
+                            break;
+                        case 1:
+                            this.Direction = "Down";
+                            break;
+                        case 2:
+                            this.Direction = "Left";
+                            break;
+                        case 3:
+                            this.Direction = "Right";
+                            break;
+                    }
+                    this.count = 0; //重置行走次数 
+                }
+                this.count += 1;
+                //判断发射的子弹是否已经死亡,若是则重新生成一个子弹
+                if (this.bulletlive == false) {
+                    //随机生成数,若为双数则不创建新子弹
+                    var seed = parseInt(Math.random() * 10);
+                    if (seed % 2 == 0) {
+                        return;
+                    }
+                    switch (this.Direction) {
+                        case "Up":
+                            this.enemybullet = new Bullets(GameObject_Data.Bullet[0], this.PosX + 7.5,
+                                this.PosY, "Up", Bullet_Speed, this);
+                            break;
+                        case "Down":
+                            this.enemybullet = new Bullets(GameObject_Data.Bullet[0], this.PosX + 7.5,
+                                this.PosY + 18, "Down", Bullet_Speed, this);
+                            break;
+                        case "Left":
+                            this.enemybullet = new Bullets(GameObject_Data.Bullet[0], this.PosX + 9,
+                                this.PosY + 7.5, "Left", Bullet_Speed, this);
+                            break;
+                        case "Right":
+                            this.enemybullet = new Bullets(GameObject_Data.Bullet[0], this.PosX + 18,
+                                this.PosY + 7.5, "Right", Bullet_Speed, this);
+                            break;
+                    }
+                    //检查敌人子弹数组中失去生命的子弹对象,并返回其下标
+                    var index = CheckLife_Array(Enemy_BulletArray);
+                    if (index != -1) {
+                        Enemy_BulletArray[index] = this.enemybullet;
+                    } else {
+                        //若当前无失去生命的子弹对象,则在数组尾部添加一个新的子弹元素
+                        Enemy_BulletArray.push(this.enemybullet);
+                    }
+                    this.bulletlive = true;
+                }
+            }
+        };
+        //子弹类
+        function Bullets(Type, PosX, PosY, Direction, Speed, Tank) {
+            this.Type = Type;
+            this.PosX = PosX;
+            this.PosY = PosY;
+            this.Direction = Direction;
+            this.Speed = Speed;
+            this.Life = true;
+            this.Tank = Tank;
+            this.Run = function () {
+                //子弹飞出边界、或者子弹死亡以及子弹碰到地图障碍物时
+                if (Boundary_Testing(this) == true || this.Life == false
+                    || MapCollision_Testing(this, CheckPoint_MapArray) == false) {
+                    this.Life = false;
+                    Map_Destory(this, CheckPoint_MapArray);
+                    //若当前子弹是敌人对象发出的,则重置bulletlive
+                    if (this.Tank.constructor == Enemy_Tank) {
+                        this.Tank.bulletlive = false;
+                    }
+                } else {
+                    switch (this.Direction) {
+                        case "Up":
+                        case "W":
+                            this.PosY -= Bullet_Speed;
+                            break;
+                        case "Down":
+                        case "S":
+                            this.PosY += Bullet_Speed;
+                            break;
+                        case "Left":
+                        case "A":
+                            this.PosX -= Bullet_Speed;
+                            break;
+                        case "Right":
+                        case "D":
+                            this.PosX += Bullet_Speed;
+                            break;
+                    }
+                }
+            }
+        };
+        var Src = "Tank.png"; //雪碧图路径
+        var BossDeath_Number = 0; //Boss死亡的数量
+        var Tank_Speed = 1.25; //坦克的速度
+        var Bullet_Speed = 2.25; //子弹的速度 
+        var Tank_Image = new Image(); //创建坦克图像
+        var Bomb_Image = new Image(); //创建爆炸图像
+        var Boss_Image = new Image(); //创建BOSS图像
+        var Bullet_Image = new Image(); //创建子弹图像
+        var MapBlock_Image = new Image(); //创建地图块图像
+        var TBR_Str = new Array(); //蓝色坦克格式化字符串数组
+        var TGR_Str = new Array(); //绿色坦克格式化字符串数组
+        var Brick_Str = new Array(); //砖墙格式化字符串数组
+        var Explode_Str = new Array(); //爆炸格式化字符串数组
+        var Steel_Str = new Array(); //钢铁墙格式化字符串数组
+        var Bullet = new Array(); //子弹格式化字符串数组
+        var Bomb_Animation = new Array(); // 爆炸动画对象数组
+        var Enemy_Tanks = new Array(); //敌方坦克数组
+        var Heros_Tanks = new Array(); //我方坦克数组
+        var Boss_Array = new Array(); //Boss数组
+        var Enemy_BulletArray = new Array(); //敌人子弹数组
+        var Heros_BulletArray = new Array(); //我方坦克子弹数组
+        var CheckPoint_MapArray = new Array(); //当前关卡的地图数组
+        var Context = document.getElementById('myCanvas');
+        var Ctx = Context.getContext('2d');
+        //浏览器兼容,获取各种浏览器的requestAnimationFrame
+        var Raf = window.requestAnimationFrame
+            || window.webkitRequestAnimationFrame
+            || window.mozRequestAnimationFrame
+            || window.oRequestAnimationFrame
+            || window.msRequestAnimationFrame
+            || function (callback) {
+                window.setTimeout(callback, 1000 / 60); //每帧1000/60ms
+            };
+        Tank_Image.src = Src; //设置路径
+        Bullet_Image.src = Src;
+        MapBlock_Image.src = Src;
+        Bomb_Image.src = Src;
+        Boss_Image.src = Src;
+        CheckPoint_MapArray = MapArray_One.concat(); //复制从另一个文件引入的地图数组
+        Initialization_GameObjectData();
+        var Hero_Blue = new Heros_Tank(GameObject_Data.Tank_Blue_Run, 288, 608, "W");
+        var Hero_Green = new Heros_Tank(GameObject_Data.Tank_Green_Run, 640, 608, "Up");
+        Heros_Tanks[0] = Hero_Blue;
+        Heros_Tanks[1] = Hero_Green;
+        Initialization_Boss();
+        Initialization_EnemyTank(4, Birth_Point);
+        Initialization_EnemyBullet(Enemy_Tanks);
+        Initialization_BombBlast(4);
+        Initialization_HerosBullet(2);
+        StartRander(); //开始渲染画面
+        //键盘指定按键松开监听
+        document.addEventListener('keyup', function (e) {
+            switch (e.keyCode) {
+                case 87:
+                    KeyPress.W = false;
+                    break;
+                case 83:
+                    KeyPress.S = false;
+                    break;
+                case 65:
+                    KeyPress.A = false;
+                    break;
+                case 68:
+                    KeyPress.D = false;
+                    break;
+                case 38:
+                    KeyPress.Up = false;
+                    break;
+                case 40:
+                    KeyPress.Down = false;
+                    break;
+                case 37:
+                    KeyPress.Left = false;
+                    break;
+                case 39:
+                    KeyPress.Right = false;
+                    break;
+                case 74:
+                    KeyPress.FireOne = false;
+                    break;
+                case 96:
+                    KeyPress.FireTwo = false;
+                    break;
+            }
+        });
+        //键盘指定按键按下监听
+        document.addEventListener('keydown', function (e) {
+            switch (e.keyCode) {
+                case 87:
+                    KeyPress.W = true;
+                    break;
+                case 83:
+                    KeyPress.S = true;
+                    break;
+                case 65:
+                    KeyPress.A = true;
+                    break;
+                case 68:
+                    KeyPress.D = true;
+                    break;
+                case 38:
+                    KeyPress.Up = true;
+                    break;
+                case 40:
+                    KeyPress.Down = true;
+                    break;
+                case 37:
+                    KeyPress.Left = true;
+                    break;
+                case 39:
+                    KeyPress.Right = true;
+                    break;
+                case 74:
+                    KeyPress.FireOne = true;
+                    break;
+                case 96:
+                    KeyPress.FireTwo = true;
+                    break;
+            }
+        });
+        //遍历所有键盘按下事件
+        function KeyPress_Listener() {
+            var Player_One = null; //临时变量,代表玩家一[蓝色坦克]
+            var Player_Two = null; //临时变量,代表玩家二[绿色坦克]
+            var Player_FireOne = null;
+            var Player_FireTwo = null;
+            for (var i in KeyPress) {
+                if (eval("KeyPress." + i) == true) {
+                    if (i == "W" || i == "S" || i == "A" || i == "D") {
+                        if (Player_One === null) {
+                            Player_One = i;
+                            TankMove_Testing(Hero_Blue, Player_One);
+                        }
+                    } else if (i == "Up" || i == "Down" || i == "Left" || i == "Right") {
+                        if (Player_Two === null) {
+                            Player_Two = i;
+                            TankMove_Testing(Hero_Green, Player_Two);
+                        }
+                    }
+                    if (i == "FireOne" && Player_FireOne === null) {
+                        Player_FireOne = i;
+                        Hero_Blue.shotEnemy();
+                    }
+                    if (i == "FireTwo" && Player_FireTwo === null) {
+                        Player_FireTwo = i;
+                        Hero_Green.shotEnemy();
+                    }
+                }
+            }
+        }
+        function StartRander() {
+            Ctx.clearRect(0, 0, 960, 640);
+            KeyPress_Listener();
+            for (var i = 0; i < Enemy_BulletArray.length; i++) {
+                if (Enemy_BulletArray[i].Life != false) {
+                    Enemy_BulletArray[i].Run();
+                }
+            }
+            for (var j = 0; j < Heros_BulletArray.length; j++) {
+                if (Heros_BulletArray[j].Life != false) {
+                    Heros_BulletArray[j].Run();
+                }
+            }
+            IsHit_EnemyTank();
+            IsHit_HerosTank();
+            Enemy_DestoryOrRebirth(Enemy_Tanks);
+            Total_Draw();
+            Raf(StartRander);
+        }
+        //所有游戏对象绘制方法总入口
+        function Total_Draw() {
+            Draw_Bullet(Enemy_BulletArray);
+            Draw_Bullet(Heros_BulletArray);
+            Draw_HerosTank(Hero_Blue);
+            Draw_HerosTank(Hero_Green);
+            Draw_Map(CheckPoint_MapArray);
+            for (var i = 0; i < Enemy_Tanks.length; i++) {
+                Draw_EnemyTank(Enemy_Tanks[i]);
+            }
+            for (var j = 0; j < Bomb_Animation.length; j++) {
+                Bomb_Animation[j].indexs++;
+                Bomb_Animation[j].checklife();
+                Draw_Bomb(Bomb_Animation[j]);
+            }
+            Draw_Boss(Boss_Array);
+
+        }
+        /*----------数据数组对象初始化和创建模块----------*/
+        //初始化将Tank.js的数据填入GameObject_Data
+        function Initialization_GameObjectData() {
+            TBR_Str = FormatString(8, "tank_blue_run", "png", TBR_Str);
+            TGR_Str = FormatString(8, "tank_green_run", "png", TGR_Str);
+            Brick_Str = FormatString(4, "brick", "png", Brick_Str);
+            Explode_Str = FormatString(3, "explode", "png", Explode_Str);
+            Steel_Str = FormatString(4, "steel", "png", Steel_Str);
+            Bullet = FormatString(2, "bullet", "png", Bullet);
+            Data_Collect(8, "tank_blue_run", TBR_Str);
+            Data_Collect(8, "tank_green_run", TGR_Str);
+            Data_Collect(4, "brick", Brick_Str);
+            Data_Collect(3, "explode", Explode_Str);
+            Data_Collect(4, "steel", Steel_Str);
+            Data_Collect(2, "bullet", Bullet);
+            Data_Collect(0, "grass", Bullet);
+            Data_Collect(0, "home", Bullet);
+            Data_Collect(0, "mud", Bullet);
+            Data_Collect(0, "road", Bullet);
+            Data_Collect(0, "sign_bullet", Bullet);
+            Data_Collect(0, "sign_tank_blue", Bullet);
+            Data_Collect(0, "sign_tank_green", Bullet);
+            Data_Collect(0, "water", Bullet);
+            //将Tank.js的数据填入GameObject_Data
+            //sum:需要填入数组的元素数量 name:序号之前的字符
+            //str_array: 格式化后的字符串数组
+            //eval()函数可以将字符串当成脚本来运行
+            function Data_Collect(sum, name, str_array) {
+                switch (name) {
+                    case "tank_blue_run":
+                        Loop(sum, "GameObject_Data.Tank_Blue_Run", str_array);
+                        break;
+                    case "explode":
+                        Loop(sum, "GameObject_Data.Explode", str_array);
+                        break;
+                    case "steel":
+                        Loop(sum, "GameObject_Data.Steel", str_array);
+                        break;
+                    case "tank_green_run":
+                        Loop(sum, "GameObject_Data.Tank_Green_Run", str_array);
+                        break;
+                    case "bullet":
+                        Loop(sum, "GameObject_Data.Bullet", str_array);
+                        break;
+                    case "brick":
+                        Loop(sum, "GameObject_Data.Brick", str_array);
+                        break;
+                    case "grass":
+                        GameObject_Data.Grass = eval("GameObject.frames.grass_png");
+                        break;
+                    case "home":
+                        GameObject_Data.Home = eval("GameObject.frames.home_png");
+                        break;
+                    case "mud":
+                        GameObject_Data.Mud = eval("GameObject.frames.mud_png");
+                        break;
+                    case "road":
+                        GameObject_Data.Road = eval("GameObject.frames.road_png");
+                        break;
+                    case "sign_bullet":
+                        GameObject_Data.Sign_Bullet = eval("GameObject.frames.sign_bullet_png");
+                        break;
+                    case "sign_tank_blue":
+                        GameObject_Data.Sign_Tank_Blue = eval("GameObject.frames.sign_tank_blue_png");
+                        break;
+                    case "sign_tank_green":
+                        GameObject_Data.Sign_Tank_Green = eval("GameObject.frames.sign_tank_green_png");
+                        break;
+                    case "water":
+                        GameObject_Data.Water = eval("GameObject.frames.water_png");
+                        break;
+                }
+            }
+            //格式化字符串
+            //sum:需要格式化的数量 name:序号之前的字符
+            //type:类型名称 array:需要存储格式化字符串的数组
+            //例: explode0_png road_png
+            function FormatString(sum, name, type, array) {
+                var Them = null;
+                if (sum != 0) {
+                    for (var i = 0; i < sum; i++) {
+                        array[i] = (name + i + "_" + type).toString();
+                    }
+                    Them = array;
+                } else {
+                    Them = (name + "_" + type)
+                }
+                return Them;
+            }
+            //sum:需要填入数组的元素数量 str:需要转化为脚本执行的字符串
+            //array: 格式化后的字符串数组
+            function Loop(sum, str, array) {
+                for (var i = 0; i < sum; i++) {
+                    eval(str)[i] = eval("GameObject.frames." + array[i]);
+                }
+            }
+        }
+        //初始化敌方坦克
+        //sum: 要初始化的敌方坦克数量 birth_point:敌方坦克出生点
+        function Initialization_EnemyTank(sum, birth_point) {
+            var ET = null;
+            var DT = "Up";
+            for (var i = 0; i < sum; i++) {
+                var seed = parseInt(Math.random() * 4);
+                switch (seed) {
+                    case 0:
+                        DT = "Up";
+                        break;
+                    case 1:
+                        DT = "Down";
+                        break;
+                    case 2:
+                        DT = "Left";
+                        break;
+                    case 3:
+                        DT = "Right";
+                        break;
+                }
+                //若敌方坦克初始生成数量大于出生点数量,则重复在其他出生点出现
+                if (i > birth_point.length - 1) {
+                    i = 0;
+                }
+                if (i % 2 == 0) {
+                    ET = new Enemy_Tank(GameObject_Data.Sign_Tank_Blue,
+                        birth_point[i][0] * 32, birth_point[i][1] * 32, DT);
+                } else {
+                    ET = new Enemy_Tank(GameObject_Data.Sign_Tank_Green,
+                        birth_point[i][0] * 32, birth_point[i][1] * 32, DT);
+                }
+                Enemy_Tanks[i] = ET;
+                var timer = window.setInterval("Enemy_Tanks[" + i + "].Run()", 1000 / 60);
+                Enemy_Tanks[i].Timer = timer; //赋予当前敌方坦克计时器对象
+            }
+        }
+        //初始化敌方子弹
+        function Initialization_EnemyBullet(array) {
+            var sum = array.length;
+            var width = array[0].Type.w;
+            var height = array[0].Type.h;
+            for (var i = 0; i < sum; i++) {
+                var them = array[i];
+                var EB = new Bullets(GameObject_Data.Bullet[0], them.PosX + (width / 2),
+                    them.PosY + (height / 2), array[i].Direction, Bullet_Speed, array[i]);
+                Enemy_BulletArray.push(EB);
+            }
+        }
+        //初始化我方子弹 sum:初始化的数量
+        function Initialization_HerosBullet(sum) {
+            var HT = null;
+            for (var i = 0; i < sum; i++) {
+                if (i % 2 != 0) {
+                    HT = new Bullets(GameObject_Data.Sign_Bullet, Hero_Blue.PosX, Hero_Blue.PosY,
+                        Hero_Blue.Direction, Bullet_Speed, Hero_Blue);
+                } else {
+                    HT = new Bullets(GameObject_Data.Sign_Bullet, Hero_Green.PosX, Hero_Green.PosY,
+                        Hero_Green.Direction, Bullet_Speed, Hero_Green);
+                }
+                //生成的我方子弹的初始状态为死亡状态
+                HT.Life = false;
+                Heros_BulletArray[i] = HT;
+            }
+        }
+        //初始化爆炸对象
+        function Initialization_BombBlast(sum) {
+            var BT = null;
+            for (var i = 0; i < sum; i++) {
+                BT = new Bomb(GameObject_Data.Explode, 0, 0, false);
+                Bomb_Animation.push(BT);
+            }
+        }
+        //初始化BOSS对象
+        function Initialization_Boss() {
+            Boss_Array[0] = new Boss(GameObject_Data.Home, 14 * 32, 19 * 32);
+            Boss_Array[1] = new Boss(GameObject_Data.Home, 15 * 32, 19 * 32);
+        }
+        //清空死亡的炸弹元素
+        //地图障碍销毁
+        function Map_Destory(Game_Object, Map_Array) {
+            var List = parseInt(Game_Object.PosX / 32);
+            var Line = parseInt(Game_Object.PosY / 32);
+            if (List < Map_Array.length && Line < Map_Array[0].length) {
+                //若当前游戏对象碰撞的障碍是完整的砖墙(在地图中完整的砖墙是以数字"1"表示)
+                //则在该处的障碍置为-1(砖墙破坏状态1)
+                switch (Map_Array[List][Line]) {
+                    case 1:
+                        Map_Array[List][Line] = -1;
+                        break;
+                    case -1:
+                        Map_Array[List][Line] = -2;
+                        break;
+                    case -2:
+                        Map_Array[List][Line] = -3;
+                        break;
+                    case -3:
+                        Map_Array[List][Line] = 0;
+                        break;
+                }
+            }
+        }
+        //判断是否到达边界
+        function Boundary_Testing(Game_Object) {
+            switch (Game_Object.Direction) {
+                case "Up":
+                case "W":
+                    if (Game_Object.PosY <= Boundary.Boundary_Up) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                    break;
+                case "Down":
+                case "S":
+                    if (Game_Object.PosY >= (Boundary.Boundary_Down)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                    break;
+                case "Left":
+                case "A":
+                    if (Game_Object.PosX <= (Boundary.Boundary_Left)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                    break;
+                case "Right":
+                case "D":
+                    if (Game_Object.PosX >= (Boundary.Boundary_Right)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                    break;
+            }
+        }
+        //判断子弹是否击中坦克
+        function Bullet_HitTesting(bullet, tank) {
+            var Width = null;
+            var Height = null;
+            //判断当前游戏对象的Type是否为数组类型
+            if (Object.prototype.toString.call(tank.Type) === '[object Array]') {
+                //宽高只取数组第一个元素
+                Width = tank.Type[0].w;
+                Height = tank.Type[0].h;
+            } else {
+                Width = tank.Type.w;
+                Height = tank.Type.h;
+            }
+            if (bullet.PosY > tank.PosY && bullet.PosY < (tank.PosY + Height)) {
+                if (bullet.PosX > tank.PosX && bullet.PosX < (tank.PosX + Width)) {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
+        }
+        //我方坦克移动检测
+        function TankMove_Testing(Game_Object, Direction) {
+            var Them = new Heros_Tank(GameObject_Data.Tank_Blue_Run, 0, 0, "Up");
+            Them.PosX = Game_Object.PosX;
+            Them.PosY = Game_Object.PosY;
+            Them.Direction = Direction;
+            Game_Object.indexs++;  //更新动画帧索引
+            Game_Object.frameReset(); //动画帧索引检测
+            switch (Direction) {
+                case "W":
+                case "Up":
+                    Them.PosY -= Tank_Speed;
+                    if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                        Game_Object.MoveUp();
+                    }
+                    break;
+                case "S":
+                case "Down":
+                    Them.PosY += Tank_Speed + (Game_Object.Type[0].h - Tank_Speed);
+                    if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                        Game_Object.MoveDown();
+                    }
+                    break;
+                case "A":
+                case "Left":
+                    Them.PosX -= Tank_Speed;
+                    if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                        Game_Object.MoveLeft();
+                    }
+                    break;
+                case "D":
+                case "Right":
+                    Them.PosX += Tank_Speed + (Game_Object.Type[0].h - Tank_Speed);
+                    if (Boundary_Testing(Them) == false && MapCollision_Testing(Them, CheckPoint_MapArray)) {
+                        Game_Object.MoveRight();
+                    }
+                    break;
+            }
+        }
+        //地图障碍碰撞检测
+        function MapCollision_Testing(Game_Object, Map_Array) {
+            var ListOne = null;
+            var LineOne = null;
+            var ListTwo = null;
+            var LineTwo = null;
+            var Width = null;
+            var Height = null;
+            //判断当前游戏对象的Type是否为数组类型
+            if (Object.prototype.toString.call(Game_Object.Type) === '[object Array]') {
+                //宽高只取数组第一个元素
+                Width = Game_Object.Type[0].w;
+                Height = Game_Object.Type[0].h;
+            } else {
+                Width = Game_Object.Type.w;
+                Height = Game_Object.Type.h;
+            }
+            switch (Game_Object.Direction) {
+                case "W":
+                case "Up":
+                case "S":
+                case "Down":
+                    ListOne = parseInt(Game_Object.PosX / 32);
+                    ListTwo = parseInt((Game_Object.PosX + Width) / 32);
+                    LineOne = parseInt(Game_Object.PosY / 32);
+                    LineTwo = parseInt(Game_Object.PosY / 32);
+                    break;
+                case "A":
+                case "Left":
+                case "D":
+                case "Right":
+                    ListOne = parseInt(Game_Object.PosX / 32);
+                    ListTwo = parseInt(Game_Object.PosX / 32);
+                    LineOne = parseInt(Game_Object.PosY / 32);
+                    LineTwo = parseInt((Game_Object.PosY + Width) / 32);
+            }
+            //通过当前坦克的坐标,换算出当前坦克所在的地图对应的数组位置
+            var Tag = [];
+            //根据方向获取坦克的两个判定点,这是为了避免坦克碰撞障碍时
+            //坦克碰撞的区域一边有障碍一边无障碍但仍然可以通过障碍的错误发生
+            var Them = [Map_Array[ListOne][LineOne], Map_Array[ListTwo][LineTwo]];
+            for (var i = 0; i < 2; i++) {
+                switch (Them[i]) {
+                    //若当前位置上无障碍,或者障碍是马路、草地,则表示允许通过
+                    case 0:
+                    case 3:
+                    case 4:
+                        Tag[i] = true;
+                        break;
+                    //若当前位置上障碍是砖墙、高山、铁墙、水沟或者是未破坏完全的砖墙,则表示不允许通过
+                    case 1:
+                    case 2:
+                    case 5:
+                    case 6:
+                    case -1:
+                    case -2:
+                    case -3:
+                        Tag[i] = false;
+                        break;
+                }
+            }
+            //两个碰撞判定点位置需要可通过
+            if (Tag[0] == true && Tag[1] == true) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+        //判断我方坦克子弹是否击中敌人对象
+        function IsHit_EnemyTank() {
+            for (var i = 0; i < Heros_BulletArray.length; i++) {
+                //取出每个子弹对象
+                var Them = Heros_BulletArray[i];
+                if (Them.Life == true) {
+                    for (var j = 0; j < Enemy_Tanks.length; j++) {
+                        var ThemEnemy = Enemy_Tanks[j];
+                        if (ThemEnemy.Life == true) {
+                            if (Bullet_HitTesting(Them, ThemEnemy)) {
+                                Them.Life = false; //我方子弹死亡
+                                ThemEnemy.Life = false; //被击中的敌方坦克死亡 
+                                //将子弹击中的坐标位置存入爆炸数组
+                                var ThemBomb = new Bomb(GameObject_Data.Explode, Them.PosX, Them.PosY, true);
+                                var index = CheckLife_Array(Bomb_Animation);
+                                if (index == -1) {
+                                    Bomb_Animation.push(ThemBomb);
+                                } else {
+                                    Bomb_Animation[index] = ThemBomb;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        //判断敌人子弹是否击中我方坦克
+        function IsHit_HerosTank() {
+            for (var i = 0; i < Enemy_BulletArray.length; i++) {
+                var Them = Enemy_BulletArray[i];
+                if (Them.Life == true) {
+                    for (var j = 0; j < Heros_Tanks.length; j++) {
+                        var ThemHero = Heros_Tanks[j];
+                        if (Bullet_HitTesting(Them, ThemHero)) {
+                            Them.Life = false; //敌方子弹死亡
+                            ThemHero.Life = false; //被击中的我方坦克死亡
+                            //将子弹击中的坐标位置存入爆炸数组
+                            var ThemBomb = new Bomb(GameObject_Data.Explode, Them.PosX, Them.PosY, true);
+                            var index = CheckLife_Array(Bomb_Animation);
+                            if (index == -1) {
+                                Bomb_Animation.push(ThemBomb);
+                            } else {
+                                Bomb_Animation[index] = ThemBomb;
+                            }
+                            if(j % 2 == 0) {
+                                //重置我方蓝色坦克位置
+                                Heros_Tanks[j].PosX = 288;
+                                Heros_Tanks[j].PosY = 608;
+                                Heros_Tanks[j].Life = true;
+                            }else {
+                                //重置我方绿色坦克位置
+                                Heros_Tanks[j].PosX = 640;
+                                Heros_Tanks[j].PosY = 608;
+                                Heros_Tanks[j].Life = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        //判断子弹是否击中BOSS
+        function IsHit_Boss() {
+            for (var i = 0; i < Enemy_BulletArray.length; i++) {
+                var Them = Enemy_BulletArray[i];
+                if (Them.Life == true) {
+                    for (var j = 0; j < Boss_Array.length; j++) {
+                        var ThemBoss = Boss_Array[j];
+                        if (ThemBoss.Life == true) {
+                            if (Bullet_HitTesting(Them, ThemBoss)) {
+                                Them.Life = false;
+                                ThemBoss.Life = false;
+                                BossDeath_Number += 1;
+                                var ThemBomb = new Bomb(GameObject_Data.Explode, Them.PosX, Them.PosY, true);
+                                var index = CheckLife_Array(Bomb_Animation);
+                                if (index == -1) {
+                                    Bomb_Animation.push(ThemBomb);
+                                } else {
+                                    Bomb_Animation[index] = ThemBomb;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        //敌方坦克销毁与重生
+        function Enemy_DestoryOrRebirth(array) {
+            for (var i = 0; i < array.length; i++) {
+                if (array[i].Life == false) {
+                    clearInterval(array[i].Timer); //清除当前坦克的定时器
+                    Random_BirthPoint(i, Birth_Point, array);
+                }
+            }
+        }
+        //检查对象数组中已经死亡的对象
+        function CheckLife_Array(array) {
+            var index = -1;
+            for (var i = 0; i < array.length; i++) {
+                //遍历对象数组中的下标
+                if (array[i].Life == false) {
+                    index = i;
+                    break;
+                }
+            }
+            return index;
+        }
+        //随机分配敌人的重生点
+        function Random_BirthPoint(Indexs, Birth_Point, Enemy) {
+            var Sum = Enemy.length; //敌人的数量
+            var Seed = parseInt(Math.random() * Sum);
+            switch (Seed) {
+                case 0:
+                    Enemy[Indexs].PosX = Birth_Point[0][0] * 32;
+                    Enemy[Indexs].PosY = Birth_Point[0][1] * 32;
+                    break;
+                case 1:
+                    Enemy[Indexs].PosX = Birth_Point[1][0] * 32;
+                    Enemy[Indexs].PosY = Birth_Point[1][1] * 32;
+                    break;
+                case 2:
+                    Enemy[Indexs].PosX = Birth_Point[2][0] * 32;
+                    Enemy[Indexs].PosY = Birth_Point[2][1] * 32;
+                    break;
+                case 3:
+                    Enemy[Indexs].PosX = Birth_Point[3][0] * 32;
+                    Enemy[Indexs].PosY = Birth_Point[3][1] * 32;
+                    break;
+            }
+            Enemy[Indexs].Life = true;
+            var timer = setInterval("Enemy_Tanks[" + Indexs + "].Run()", 1000 / 60);
+            Enemy[Indexs].Timer = timer;
+        }
+        //绘制爆炸物对象
+        function Draw_Bomb(Game_Object) {
+            if (Game_Object.Life == false) {
+                return;
+            }
+            var width = Game_Object.Type[0].w;
+            var height = Game_Object.Type[0].h;
+            var X = Game_Object.Type[Game_Object.indexs].x;
+            var Y = Game_Object.Type[Game_Object.indexs].y;
+            Ctx.save();
+            //Ctx.translate(Game_Object.PosX + (width / 2), Game_Object.PosY + (height / 2));
+            Ctx.drawImage(Bomb_Image, X, Y, width, height,
+                Game_Object.PosX, Game_Object.PosY, 32, 32);
+            //Ctx.translate(-(Game_Object.PosX + width / 2), -(Game_Object.PosY + height / 2));
+            Ctx.restore();
+        }
+        //绘制我方坦克对象
+        function Draw_HerosTank(Game_Object) {
+            //若对象处于死亡状态,则不进行绘制
+            if (Game_Object.Life == false) {
+                return;
+            }
+            var width_Half = Game_Object.Type[0].w / 2;
+            var height_Half = Game_Object.Type[0].h / 2;
+            var angle = 0;
+            var X = Game_Object.Type[Game_Object.indexs].x;
+            var Y = Game_Object.Type[Game_Object.indexs].y;
+            switch (Game_Object.Direction) {
+                case "Up":
+                case "W":
+                    angle = 0;
+                    break;
+                case "Down":
+                case "S":
+                    angle = 180;
+                    break;
+                case "Left":
+                case "A":
+                    angle = 270;
+                    break;
+                case "Right":
+                case "D":
+                    angle = 90;
+                    break;
+            }
+            //若不进行记录与返回状态,旋转后的图片会以当前旋转的位置为基准进行下一次旋转
+            //例如: 当前旋转180度, 下一次要再旋转90度,则当前图片会以旋转180度的位置为基准
+            //再旋转90度,此时的图片就变成旋转270度后的效果,而不是旋转90度的效果  
+            Ctx.save(); //记录当前状态
+            //左上角的起始点平移到当前对象的中心
+            Ctx.translate(Game_Object.PosX + width_Half, Game_Object.PosY + height_Half);
+            //将当前对象旋转
+            Ctx.rotate(angle * Math.PI / 180);
+            //将先前的起始点移回左上角
+            Ctx.translate(-(Game_Object.PosX + width_Half), -(Game_Object.PosY + height_Half));
+            //绘制坦克
+            Ctx.drawImage(Tank_Image, X, Y, width_Half * 2, height_Half * 2,
+                Game_Object.PosX, Game_Object.PosY, Game_Object.Type[0].w, Game_Object.Type[0].h);
+            Ctx.restore(); //返回旋转前状态
+        }
+        //绘制敌方坦克对象
+        function Draw_EnemyTank(Game_Object) {
+            if (Game_Object.Life == false) {
+                return;
+            }
+            var width_Half = Game_Object.Type.w / 2;
+            var height_Half = Game_Object.Type.h / 2;
+            var angle = 0;
+            var X = Game_Object.Type.x;
+            var Y = Game_Object.Type.y;
+            switch (Game_Object.Direction) {
+                case "Up":
+                    angle = 0;
+                    break;
+                case "Down":
+                    angle = 180;
+                    break;
+                case "Left":
+                    angle = 270;
+                    break;
+                case "Right":
+                    angle = 90;
+                    break;
+            }
+            Ctx.save();
+            Ctx.translate(Game_Object.PosX + width_Half, Game_Object.PosY + height_Half);
+            Ctx.rotate(angle * Math.PI / 180);
+            Ctx.translate(-(Game_Object.PosX + width_Half), -(Game_Object.PosY + height_Half));
+            Ctx.drawImage(Tank_Image, X, Y, width_Half * 2, height_Half * 2,
+                Game_Object.PosX, Game_Object.PosY, Game_Object.Type.w, Game_Object.Type.h);
+            Ctx.restore();
+        }
+        //绘制子弹对象
+        function Draw_Bullet(array) {
+            for (var j = 0; j < array.length; j++) {
+                if (array[j].Life == false) {
+                    continue;
+                }
+                var Them = array[j];
+                var X = Them.Type.x;
+                var Y = Them.Type.y;
+                if (Them != null && Them.Life == true) {
+                    switch (Them.Direction) {
+                        case "Up":
+                        case "W":
+                            angle = 0;
+                            break;
+                        case "Down":
+                        case "S":
+                            angle = 180;
+                            break;
+                        case "Left":
+                        case "A":
+                            angle = 270;
+                            break;
+                        case "Right":
+                        case "D":
+                            angle = 90;
+                            break;
+                    }
+                    Ctx.save();
+                    Ctx.translate(Them.PosX + Them.Type.w / 2, Them.PosY + Them.Type.h / 2);
+                    Ctx.rotate(angle * Math.PI / 180);
+                    Ctx.translate(-(Them.PosX + Them.Type.w / 2), -(Them.PosY + Them.Type.h / 2));
+                    Ctx.drawImage(Bullet_Image, X, Y, Them.Type.w, Them.Type.h,
+                        Them.PosX, Them.PosY, Them.Type.w, Them.Type.h);
+                    Ctx.restore();
+                }
+            }
+        }
+        //绘制BOSS
+        function Draw_Boss(array) {
+            var width = array[0].Type.w;
+            var height = array[0].Type.h;
+            for (var i = 0; i < array.length; i++) {
+                if (array[i].Life == false) {
+                    continue;
+                }
+                var X = array[i].Type.x;
+                var Y = array[i].Type.y;
+                Ctx.save();
+                Ctx.drawImage(Boss_Image, X, Y, width, height, array[i].PosX, array[i].PosY, width, height);
+                Ctx.restore();
+            }
+        }
+        //绘制场景地图
+        //可以复用image对象MapBlock_Image,画地图时根据坐标进行不同位置和不同类型的图片绘制
+        //若每个地图块建立一个image对象,对资源占用过高,导致游戏变卡顿
+        function Draw_Map(array) {
+            var line = array.length; //获取列
+            var list = array[0].length; //获取行
+            for (var i = 0; i < line; i++) {
+                for (var j = 0; j < list; j++) {
+                    if (array[i][j] == 0) {
+                        continue;
+                    }
+                    switch (array[i][j]) {
+                        case 1:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Brick[0].x, GameObject_Data.Brick[0].y,
+                                GameObject_Data.Brick[0].w, GameObject_Data.Brick[0].h, i * 32, j * 32,
+                                GameObject_Data.Brick[0].w, GameObject_Data.Brick[0].h);
+                            break;
+                        case 2:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Mud.x, GameObject_Data.Mud.y,
+                                GameObject_Data.Mud.w, GameObject_Data.Mud.h, i * 32, j * 32,
+                                GameObject_Data.Mud.w, GameObject_Data.Mud.h);
+                            break;
+                        case 3:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Grass.x, GameObject_Data.Grass.y,
+                                GameObject_Data.Grass.w, GameObject_Data.Grass.h, i * 32, j * 32,
+                                GameObject_Data.Grass.w, GameObject_Data.Grass.h);
+                            break;
+                        case 4:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Road.x, GameObject_Data.Road.y,
+                                GameObject_Data.Road.w, GameObject_Data.Road.h, i * 32, j * 32,
+                                GameObject_Data.Road.w, GameObject_Data.Road.h);
+                            break;
+                        case 5:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Steel[0].x, GameObject_Data.Steel[0].y,
+                                GameObject_Data.Steel[0].w, GameObject_Data.Steel[0].h, i * 32, j * 32,
+                                GameObject_Data.Steel[0].w, GameObject_Data.Steel[0].h);
+                            break;
+                        case 6:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Water.x, GameObject_Data.Water.y,
+                                GameObject_Data.Water.w, GameObject_Data.Water.h, i * 32, j * 32,
+                                GameObject_Data.Water.w, GameObject_Data.Water.h);
+                            break;
+                        case -1:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Brick[1].x, GameObject_Data.Brick[1].y,
+                                GameObject_Data.Brick[1].w, GameObject_Data.Brick[1].h, i * 32, j * 32,
+                                GameObject_Data.Brick[1].w, GameObject_Data.Brick[1].h);
+                            break;
+                        case -2:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Brick[2].x, GameObject_Data.Brick[2].y,
+                                GameObject_Data.Brick[2].w, GameObject_Data.Brick[2].h, i * 32, j * 32,
+                                GameObject_Data.Brick[2].w, GameObject_Data.Brick[2].h);
+                            break;
+                        case -3:
+                            Ctx.drawImage(MapBlock_Image, GameObject_Data.Brick[3].x, GameObject_Data.Brick[3].y,
+                                GameObject_Data.Brick[3].w, GameObject_Data.Brick[3].h, i * 32, j * 32,
+                                GameObject_Data.Brick[3].w, GameObject_Data.Brick[3].h);
+                            break;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
